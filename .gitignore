@@ -125,4 +125,5 @@ tx/tinker/alembic/__pycache__/
 *.db-shm
 
 # claude settings
-.claude/settings.json
+.claude/settings.json.venv-data/
+data/
