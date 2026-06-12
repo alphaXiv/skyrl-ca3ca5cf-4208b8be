@@ -28,6 +28,11 @@ register(
 )
 
 register(
+    id="chroma_search",
+    entry_point="skyrl_gym.envs.chroma_search.env:ChromaSearchEnv",
+)
+
+register(
     id="lcb",
     entry_point="skyrl_gym.envs.lcb.env:LCBEnv",
 )

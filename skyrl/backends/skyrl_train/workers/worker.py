@@ -199,7 +199,12 @@ class DistributedTorchRayActor:
             ]
 
         try:
-            LIBNUMA = CDLL(find_library("numa"))
+            libnuma_path = find_library("numa")
+            if libnuma_path is None:
+                # CDLL(None) would "succeed" (dlopen(NULL)) and then fail with an
+                # AttributeError at the first symbol lookup below, outside this try.
+                raise OSError("libnuma not found")
+            LIBNUMA = CDLL(libnuma_path)
         except Exception as e:
             logger.error(f"Skipping NUMA affinity setup because libnuma is not installed: {e}")
             _SET_AFFINITY = True
