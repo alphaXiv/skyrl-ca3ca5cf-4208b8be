@@ -224,6 +224,20 @@ async def evaluate_step_wise(
         }
     )
 
+    # 3b. Aggregate environment metrics (env.get_metrics() on the final step) so
+    # env-specific eval quality (e.g. retrieval recall / prune accuracy) is logged.
+    env_metrics_last = generator_output_last_step.get("env_metrics")
+    if env_metrics_last:
+        agg: Dict[str, List[float]] = defaultdict(list)
+        for m in env_metrics_last:
+            if not m:
+                continue
+            for k, v in m.items():
+                if isinstance(v, (int, float)):
+                    agg[k].append(float(v))
+        for k, vals in agg.items():
+            eval_metrics[f"eval/env/{k}"] = sum(vals) / len(vals)
+
     # 4. Prepare dumping data
     # TODO[Ben] update this to be cloud-compatible
     if cfg.trainer.dump_eval_results:

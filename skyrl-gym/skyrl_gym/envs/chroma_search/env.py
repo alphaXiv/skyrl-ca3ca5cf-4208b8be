@@ -39,8 +39,8 @@ from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput, Con
 class ChromaSearchEnvConfig:
     corpus_path: str = "data/corpus.jsonl"
     tokenizer_path: str = "Qwen/Qwen3-1.7B"
-    token_budget: int = 8192
-    search_topk: int = 5
+    token_budget: int = 4096
+    search_topk: int = 8
     grep_max_hits: int = 5
     read_max_chunks: int = 10
     max_tool_calls_per_turn: int = 4
