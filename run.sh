@@ -36,7 +36,7 @@ uv pip install --python .venv/bin/python -q openai datasets pandas pyarrow peft
 .venv/bin/python rgsd/train_rgsd.py \
   --model "$MODEL" --train "$ROOT/data/train.parquet" --val "$ROOT/data/validation.parquet" \
   --epochs 2 --batch-prompts 16 --lora-rank 32 --lora-alpha 64 --lr 1e-4 \
-  --beta 0.5 --gen-temp 1.0 --max-new-tokens 768 \
+  --beta 0.5 --gen-temp 1.0 --max-new-tokens 768 --jsd-clip 2.0 \
   --eval-interval 16 --eval-prompts 300 \
   --out EVAL.md --save-lora "$HOME/rgsd_lora"
 
