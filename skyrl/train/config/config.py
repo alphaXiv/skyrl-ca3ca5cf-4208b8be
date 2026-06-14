@@ -19,6 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from skyrl_gym.envs.search.env import SearchEnvConfig
 from skyrl_gym.envs.chroma_search.env import ChromaSearchEnvConfig
+from skyrl_gym.envs.rubric.env import RubricEnvConfig
 from skyrl_gym.envs.sql.env import Text2SQLEnvConfig
 
 # ---------------------------------------------------------------------------
@@ -645,6 +646,7 @@ class SkyRLGymConfig(BaseConfig):
     llm_as_a_judge: GSM8kLLMJudgeEnvConfig = field(default_factory=GSM8kLLMJudgeEnvConfig)
     search: SearchEnvConfig = field(default_factory=SearchEnvConfig)
     chroma_search: ChromaSearchEnvConfig = field(default_factory=ChromaSearchEnvConfig)
+    rubric: RubricEnvConfig = field(default_factory=RubricEnvConfig)
 
 
 @dataclass

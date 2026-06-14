@@ -139,6 +139,26 @@ def usage_summary() -> Dict[str, Any]:
         return dict(_USAGE)
 
 
+def _dump_usage_atexit() -> None:
+    """On process exit, write this process's judge usage so the run can report cost.
+
+    Captures the main/driver process's usage (where the env thread-pool grades).
+    Approximate under multi-process Ray, but gives a real OpenRouter $ figure.
+    """
+    out = os.environ.get("RGSD_JUDGE_USAGE_OUT")
+    if out:
+        try:
+            with open(out, "w") as f:
+                json.dump(usage_summary(), f)
+        except Exception:
+            pass
+
+
+import atexit  # noqa: E402
+
+atexit.register(_dump_usage_atexit)
+
+
 def grade(question: str, response: str, rubrics: List[Dict[str, Any]], max_retries: int = 4) -> float:
     """Return rubric-satisfaction score in [0,1]. Robust to API/parse failures.
 

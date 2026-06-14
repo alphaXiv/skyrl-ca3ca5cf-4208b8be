@@ -33,6 +33,11 @@ register(
 )
 
 register(
+    id="rubric",
+    entry_point="skyrl_gym.envs.rubric.env:RubricEnv",
+)
+
+register(
     id="lcb",
     entry_point="skyrl_gym.envs.lcb.env:LCBEnv",
 )
