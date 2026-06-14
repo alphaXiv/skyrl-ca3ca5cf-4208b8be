@@ -127,3 +127,10 @@ tx/tinker/alembic/__pycache__/
 # claude settings
 .claude/settings.json.venv-data/
 data/
+
+# RGSD runtime outputs
+judge_cache.jsonl
+eval_rollouts.jsonl
+data_EVAL.md
+train.log
+.openresearch/
