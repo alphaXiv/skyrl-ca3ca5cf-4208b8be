@@ -37,14 +37,30 @@ class RubricEnv(BaseTextEnv):
         self._score = 0.0
         self._chars = 0.0
 
+    # Length-penalty knobs: judge-only reward is well-known to be hacked by verbose,
+    # listy responses. We softly penalize chars > LEN_PENALTY_THRESHOLD so the GRPO arm
+    # can't trivially win by emitting longer answers. The threshold is calibrated to
+    # the baseline's average response length, and the slope is gentle (0.1 per
+    # threshold-worth of extra chars), so a model that legitimately improves rubric
+    # satisfaction still wins net reward.
+    LEN_PENALTY_THRESHOLD = 1200.0
+    LEN_PENALTY_COEF = 0.1
+
     def step(self, action: str) -> BaseTextEnvStepOutput:
         from rgsd.judge import grade  # imported lazily so the env module loads even pre-install
 
         self._score = grade(self.question, action, self.rubrics)
         self._chars = float(len(action))
+        # reward = score - 0.1 * max(0, (chars - 1200) / 1200), clipped to [0, 1].
+        # Tracks raw rubric_sat separately in get_metrics() so the eval gate
+        # (mean rubric-sat) is unaffected; only the training reward is shaped.
+        length_penalty = self.LEN_PENALTY_COEF * max(
+            0.0, (self._chars - self.LEN_PENALTY_THRESHOLD) / self.LEN_PENALTY_THRESHOLD
+        )
+        reward = max(0.0, min(1.0, self._score - length_penalty))
         return BaseTextEnvStepOutput(
             observations=[],
-            reward=self._score,
+            reward=reward,
             done=True,  # single-turn: one response -> graded -> done
             metadata=self.get_metrics(),
         )
