@@ -20,6 +20,8 @@ uv run --isolated --extra fsdp -m skyrl.train.entrypoints.main_base \
   data.train_data="['$DATA_DIR/train.parquet']" \
   data.val_data="['$DATA_DIR/validation.parquet']" \
   trainer.algorithm.advantage_estimator="grpo" \
+  trainer.algorithm.loss_reduction=seq_mean_token_sum_norm \
+  trainer.algorithm.grpo_norm_by_std=false \
   trainer.policy.model.path="Qwen/Qwen2.5-1.5B-Instruct" \
   trainer.placement.colocate_all=true \
   trainer.strategy=fsdp \
@@ -41,7 +43,7 @@ uv run --isolated --extra fsdp -m skyrl.train.entrypoints.main_base \
   trainer.max_prompt_length=512 \
   generator.sampling_params.max_generate_length=1024 \
   trainer.policy.optimizer_config.lr=1.0e-6 \
-  trainer.algorithm.use_kl_loss=true \
+  trainer.algorithm.use_kl_loss=false \
   generator.inference_engine.backend=$INFERENCE_BACKEND \
   generator.inference_engine.run_engines_locally=true \
   generator.inference_engine.weight_sync_backend=nccl \
