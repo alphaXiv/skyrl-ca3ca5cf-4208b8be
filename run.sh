@@ -71,7 +71,7 @@ set +e
   trainer.micro_forward_batch_size_per_gpu=2 \
   trainer.micro_train_batch_size_per_gpu=1 \
   trainer.max_prompt_length=2048 \
-  generator.max_input_length=4096 \
+  generator.max_input_length=2048 \
   generator.sampling_params.max_generate_length=1024 \
   generator.batched=false \
   generator.use_conversation_multi_turn=true \
