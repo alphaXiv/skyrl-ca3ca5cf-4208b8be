@@ -42,6 +42,8 @@ uv run --isolated --extra fsdp -m skyrl.train.entrypoints.main_base \
   generator.sampling_params.max_generate_length=1024 \
   trainer.policy.optimizer_config.lr=1.0e-6 \
   trainer.algorithm.use_kl_loss=true \
+  trainer.algorithm.policy_loss_type="gspo" \
+  trainer.algorithm.loss_reduction="sequence_mean" \
   generator.inference_engine.backend=$INFERENCE_BACKEND \
   generator.inference_engine.run_engines_locally=true \
   generator.inference_engine.weight_sync_backend=nccl \
