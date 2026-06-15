@@ -835,14 +835,20 @@ class RayPPOTrainer:
                     f"RGSD: missing ground_truth for uid={uid}. The dataset row must carry "
                     "reward_spec.ground_truth = {question, rubrics}."
                 )
+                # Coerce parquet/env_extras round-trip types (numpy records) to plain py.
+                question = str(gt["question"])
+                rubrics = [dict(r) for r in gt["rubrics"]]
                 teacher_messages = [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": conditioned_user(gt["question"], gt["rubrics"])},
+                    {"role": "user", "content": conditioned_user(question, rubrics)},
                 ]
-                ids = self.tokenizer.apply_chat_template(
-                    teacher_messages, add_generation_prompt=True, tokenize=True
+                # Robust two-step tokenization (apply_chat_template(tokenize=True) does not
+                # reliably return plain int ids on this transformers version).
+                text = self.tokenizer.apply_chat_template(
+                    teacher_messages, add_generation_prompt=True, tokenize=False
                 )
-                teacher_prompt_ids.append(list(ids))
+                ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
+                teacher_prompt_ids.append([int(t) for t in ids])
 
             (
                 teacher_sequences_tensor,
