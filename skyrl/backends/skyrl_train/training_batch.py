@@ -472,6 +472,9 @@ class TrainingInput(TypedDict, total=False):
     rollout_expert_indices: Optional[Integer[torch.Tensor, "batch_size seq_len layer_num topk"]]
     pixel_values: Optional[TensorList]  # list of `batch_size` [num_patches_i, dim] tensors
     image_grid_thw: Optional[TensorList]  # list of `batch_size` [num_images_i, 3] tensors
+    # RGSD (Rubric-Guided Self-Distillation) teacher inputs (None unless use_rgsd_loss).
+    teacher_sequences: Optional[Integer[torch.Tensor, "batch_size teacher_seq_len"]]
+    teacher_attention_mask: Optional[Integer[torch.Tensor, "batch_size teacher_seq_len"]]
 
 
 class TrainingInputBatch(TensorBatch[TrainingInput]):

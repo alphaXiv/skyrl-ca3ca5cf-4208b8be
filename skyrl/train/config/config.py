@@ -458,6 +458,16 @@ class AlgorithmConfig(BaseConfig):
     max_seq_len: Optional[int] = None
     """Used for ``seq_mean_token_sum_norm`` loss reduction.
     Must be set explicitly for that reduction mode; otherwise can remain ``None``."""
+    use_rgsd_loss: bool = False
+    """Rubric-Guided Self-Distillation (RGSD). When ``True``, the worker replaces the
+    PG/advantage policy update with a per-token JSD loss that distills a rubric-conditioned
+    teacher (base weights, LoRA adapter disabled, prompt = system + rubric-conditioned user)
+    into the prompt-only student (LoRA on). Verifier-free: set ``use_kl_loss=false`` and
+    ``use_kl_in_reward=false`` with it. Requires no sequence packing / no SP (asserted)."""
+    rgsd_beta: float = 0.5
+    """JSD mixing weight for RGSD. ``0.5`` = symmetric Jensen-Shannon divergence."""
+    rgsd_jsd_clip: float = 0.0
+    """If ``> 0``, clamp per-token JSD to this max value (0 = no clip)."""
 
 
 # ---------------------------------------------------------------------------

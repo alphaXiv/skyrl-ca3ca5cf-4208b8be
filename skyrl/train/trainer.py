@@ -129,6 +129,11 @@ class RayPPOTrainer:
         self.all_timings = {}
         self.global_step = 0
 
+        # RGSD: per-batch map uid -> reward_spec.ground_truth ({question, rubrics}),
+        # populated right after prepare_generator_input and consumed in
+        # convert_to_training_input to build the rubric-conditioned teacher inputs.
+        self._rgsd_gt_by_uid: Dict[str, Any] = {}
+
         self._vllm_metrics_scraper: Optional[VLLMMetricsScraper] = (
             VLLMMetricsScraper() if cfg.generator.inference_engine.enable_ray_prometheus_stats else None
         )
@@ -301,6 +306,16 @@ class RayPPOTrainer:
                         "train",
                         self.global_step,
                     )
+
+                    # RGSD: stash uid -> ground_truth ({question, rubrics}) for building
+                    # the rubric-conditioned teacher inputs in convert_to_training_input.
+                    # `env_extras` and `uids` from prepare_generator_input are aligned 1:1.
+                    if self.cfg.trainer.algorithm.use_rgsd_loss:
+                        self._rgsd_gt_by_uid = {}
+                        for uid, env_extra in zip(uids, generator_input["env_extras"]):
+                            gt = (env_extra or {}).get("reward_spec", {}).get("ground_truth")
+                            if gt is not None:
+                                self._rgsd_gt_by_uid[uid] = gt
 
                     # 1.1. generation phase
                     with Timer("generate", self.all_timings):
@@ -803,6 +818,52 @@ class RayPPOTrainer:
         training_input.metadata = {"uids": uids}
         if generator_output.get("is_last_step", None) is not None:
             training_input.metadata["is_last_step"] = generator_output["is_last_step"]
+
+        # RGSD: build the rubric-conditioned teacher inputs. We reuse
+        # `convert_prompts_responses_to_batch_tensors` with the SAME `response_ids`
+        # but a rubric-conditioned teacher prompt, so the teacher sequence is laid out
+        # identically: `[PAD..][teacher_prompt][response]` left-padded, and its last
+        # `num_actions` positions are EXACTLY the student's response tokens (1:1). This
+        # is the constraint the worker's JSD slice relies on.
+        if self.cfg.trainer.algorithm.use_rgsd_loss:
+            from rgsd.prompts import SYSTEM_PROMPT, conditioned_user
+
+            teacher_prompt_ids: List[List[int]] = []
+            for uid in uids:
+                gt = self._rgsd_gt_by_uid.get(uid)
+                assert gt is not None, (
+                    f"RGSD: missing ground_truth for uid={uid}. The dataset row must carry "
+                    "reward_spec.ground_truth = {question, rubrics}."
+                )
+                teacher_messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": conditioned_user(gt["question"], gt["rubrics"])},
+                ]
+                ids = self.tokenizer.apply_chat_template(
+                    teacher_messages, add_generation_prompt=True, tokenize=True
+                )
+                teacher_prompt_ids.append(list(ids))
+
+            (
+                teacher_sequences_tensor,
+                teacher_attention_masks_tensor,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = convert_prompts_responses_to_batch_tensors(
+                self.tokenizer,
+                teacher_prompt_ids,
+                response_ids,
+                rewards,
+                loss_masks,
+                None,
+                None,
+                max_seq_len=None,
+            )
+            training_input["teacher_sequences"] = teacher_sequences_tensor
+            training_input["teacher_attention_mask"] = teacher_attention_masks_tensor
 
         # 4. Compute mini-batch boundaries for train_critic_and_policy(). It excludes the ones
         # we will add in pad_training_input_batch().

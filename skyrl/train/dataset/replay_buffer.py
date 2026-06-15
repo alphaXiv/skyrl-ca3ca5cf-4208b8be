@@ -77,6 +77,11 @@ class Experience:
     # Per-row sub-sequence lengths for sequence packing (one 1-D int tensor per
     # packed row); ``None`` when packing is off.
     sub_seq_lengths: Optional[TensorList] = None
+    # RGSD (Rubric-Guided Self-Distillation) teacher inputs. ``teacher_sequences`` is
+    # left-padded ``[PAD..][teacher_prompt][response]`` so its last ``num_actions``
+    # positions are the SAME response tokens as ``sequences``. ``None`` unless RGSD is on.
+    teacher_sequences: Optional[Integer[torch.Tensor, "batch teacher_seq_len"]] = None
+    teacher_attention_mask: Optional[Integer[torch.LongTensor, "batch teacher_seq_len"]] = None
 
     @torch.no_grad()
     def to_device(self, device: torch.device) -> None:
@@ -107,6 +112,10 @@ class Experience:
             self.image_grid_thw = self.image_grid_thw.to(device)
         if self.sub_seq_lengths is not None:
             self.sub_seq_lengths = self.sub_seq_lengths.to(device)
+        if self.teacher_sequences is not None:
+            self.teacher_sequences = to(self.teacher_sequences, device)
+        if self.teacher_attention_mask is not None:
+            self.teacher_attention_mask = to(self.teacher_attention_mask, device)
 
     def pin_memory(self):
         self.sequences = pin_memory(self.sequences)
@@ -130,6 +139,10 @@ class Experience:
             self.rollout_logprobs = self.rollout_logprobs.pin_memory()
         if self.rollout_expert_indices is not None:
             self.rollout_expert_indices = self.rollout_expert_indices.pin_memory()
+        if self.teacher_sequences is not None:
+            self.teacher_sequences = pin_memory(self.teacher_sequences)
+        if self.teacher_attention_mask is not None:
+            self.teacher_attention_mask = self.teacher_attention_mask.pin_memory()
         return self
 
 

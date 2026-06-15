@@ -47,6 +47,7 @@ from skyrl.backends.skyrl_train.utils.ppo_utils import (
     PolicyLossRegistry,
     compute_approx_kl,
     ppo_critic_loss,
+    rgsd_jsd_loss,
 )
 from skyrl.backends.skyrl_train.utils.torch_utils import masked_mean
 from skyrl.backends.skyrl_train.workers.worker_utils import (
@@ -784,6 +785,74 @@ class PolicyWorkerBase(Worker):
         loss_mask = experience.loss_mask
         action_mask = experience.action_mask
         rollout_action_logprobs = experience.rollout_logprobs
+
+        # RGSD (Rubric-Guided Self-Distillation): replace the PG/advantage update with a
+        # per-token JSD loss distilling a rubric-conditioned teacher (base weights, LoRA
+        # adapter disabled) into the prompt-only student (LoRA on). Skips advantages /
+        # old_logprobs / KL / entropy entirely.
+        if self.cfg.algorithm.use_rgsd_loss:
+            # First-cut constraint: the teacher slice ``output["logits"][:, -A-1:-1]`` only
+            # lines up with the response when there is NO sequence packing / SP. With packing,
+            # ``output["logits"]`` is the packed (1, nnz, V) tensor and is not re-padded.
+            assert not getattr(self.model, "remove_microbatch_padding", False), (
+                "use_rgsd_loss requires no sequence packing: set "
+                "trainer.remove_microbatch_padding=false (it defaults to True). With packing "
+                "output['logits'] is the packed (1, nnz, V) tensor and the response slice misaligns."
+            )
+            assert self.sequence_parallel_size == 1, "use_rgsd_loss does not support sequence_parallel_size > 1"
+            assert (
+                experience.teacher_sequences is not None and experience.teacher_attention_mask is not None
+            ), "use_rgsd_loss requires teacher_sequences/teacher_attention_mask threaded through the batch"
+
+            teacher_sequences = experience.teacher_sequences
+            teacher_attention_mask = experience.teacher_attention_mask
+            temperature = self.cfg.algorithm.temperature
+
+            with torch.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                # Student forward: adapter ON, grad ON.
+                _, student_output = self.model(
+                    sequences,
+                    num_actions,
+                    attention_mask=attention_mask,
+                    temperature=temperature,
+                    return_output=True,
+                    pixel_values=experience.pixel_values,
+                    image_grid_thw=experience.image_grid_thw,
+                )
+                # logits over response positions only: log_probs[:, -A-1:-1] convention.
+                student_logits = student_output["logits"][:, -num_actions - 1 : -1, :]
+
+                # Teacher forward: base weights (LoRA adapter disabled), no grad.
+                # `self.model` is the HFModelWrapper; `self.model.model` is the PeftModel
+                # (FSDP2 composable wrap leaves it in place), which provides disable_adapter().
+                with torch.no_grad(), self.model.model.disable_adapter():
+                    _, teacher_output = self.model(
+                        teacher_sequences,
+                        num_actions,
+                        attention_mask=teacher_attention_mask,
+                        temperature=temperature,
+                        return_output=True,
+                    )
+                teacher_logits = teacher_output["logits"][:, -num_actions - 1 : -1, :].detach()
+
+                loss, rgsd_metrics = rgsd_jsd_loss(
+                    student_logits,
+                    teacher_logits,
+                    loss_mask=loss_mask,
+                    beta=self.cfg.algorithm.rgsd_beta,
+                    clip=self.cfg.algorithm.rgsd_jsd_clip,
+                )
+
+            scaled_loss = loss * microbatch_weight
+            self.strategy.backward(scaled_loss, self.model, self.optimizer)
+
+            status = {
+                "final_loss": loss.item(),
+                "rgsd_jsd": rgsd_metrics["jsd"],
+                "response_length": num_actions,
+                "policy_lr": self.scheduler.get_last_lr()[0],
+            }
+            return status
 
         # Determine which loss function to use
         resolved_loss_name = loss_fn if loss_fn is not None else self.cfg.algorithm.policy_loss_type

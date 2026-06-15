@@ -128,5 +128,9 @@ class BatchIterator:
             # Per-row sub-sequence lengths for sequence packing (None otherwise);
             # chunked per micro-batch by ``TensorBatch.chunk`` like any other field.
             sub_seq_lengths=batch.get("sub_seq_lengths"),
+            # RGSD teacher inputs (None unless use_rgsd_loss). Propagated through
+            # chunk/slice/stage like any other tensor field.
+            teacher_sequences=batch.get("teacher_sequences"),
+            teacher_attention_mask=batch.get("teacher_attention_mask"),
         )
         return exp

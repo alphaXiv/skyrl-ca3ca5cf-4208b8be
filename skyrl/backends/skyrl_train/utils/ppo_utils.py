@@ -125,6 +125,50 @@ def compute_approx_kl(
     return kld
 
 
+def rgsd_jsd_loss(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    loss_mask: Optional[torch.Tensor] = None,
+    beta: float = 0.5,
+    clip: float = 0.0,
+) -> Tuple[torch.Tensor, dict]:
+    """Per-token Jensen-Shannon divergence loss for Rubric-Guided Self-Distillation.
+
+    Distills a (detached) rubric-conditioned teacher distribution into the
+    prompt-only student distribution. Both ``student_logits`` and
+    ``teacher_logits`` are ``[B, A, V]`` over the SAME response positions
+    (``A == num_actions``), 1:1 aligned token-wise.
+
+    JSD = beta * KL(p || m) + (1 - beta) * KL(q || m), where
+    p = softmax(student), q = softmax(teacher).detach(), m = beta*p + (1-beta)*q.
+
+    Args:
+        student_logits: ``[B, A, V]`` student logits (requires grad).
+        teacher_logits: ``[B, A, V]`` teacher logits (will be detached).
+        loss_mask: ``[B, A]`` response/action mask (1 = include in loss).
+        beta: JSD mixing weight. ``beta=0.5`` is the symmetric JSD.
+        clip: If ``> 0``, clamp per-token JSD to this max (0 = no clip).
+
+    Returns:
+        ``(loss, metrics)`` where ``loss`` is the masked-mean per-token JSD
+        (scalar tensor) and ``metrics`` is ``{"jsd": value}``.
+    """
+    # Compute in fp32 for numerical stability of the log-mixture.
+    sp = torch.log_softmax(student_logits.float(), dim=-1)  # log p
+    tp = torch.log_softmax(teacher_logits.float(), dim=-1).detach()  # log q (detached)
+    p = sp.exp()
+    q = tp.exp()
+    m = (beta * p + (1.0 - beta) * q).clamp_min(1e-12)
+    logm = m.log()
+    kl_pm = (p * (sp - logm)).sum(dim=-1)  # KL(p || m), [B, A]
+    kl_qm = (q * (tp - logm)).sum(dim=-1)  # KL(q || m), [B, A]
+    jsd = beta * kl_pm + (1.0 - beta) * kl_qm  # [B, A]
+    if clip > 0:
+        jsd = jsd.clamp(max=clip)
+    loss = masked_mean(jsd, loss_mask)
+    return loss, {"jsd": loss.detach().item()}
+
+
 def masked_var(values, mask, unbiased=True):
     """Compute variance of tensor with masked values."""
     mean = masked_mean(values, mask)
