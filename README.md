@@ -1,3 +1,25 @@
+## Implementation notes
+
+This repo reproduces Rubric-Guided Self-Distillation (RGSD, arXiv 2606.12507) versus judge-based GRPO on RubricHub-medical with Qwen-2.5-3B-Instruct, inside SkyRL.
+
+Entrypoint:
+
+```
+bash run.sh
+```
+
+Expect: 1x A100-80GB, about 55 minutes, roughly $2 GPU plus ~$0.50 OpenRouter (gpt-4o-mini eval judge). Set `OPENROUTER_API_KEY`. `main` runs the RGSD arm. For the GRPO baseline set `trainer.algorithm.use_rgsd_loss=false generator.n_samples_per_prompt=8` (see `run.sh`).
+
+Takeaways:
+- RGSD beat GRPO on rubric satisfaction (peak 0.338 vs 0.285), verifier-free (0 training judge calls).
+- The teacher is the same weights with `peft` `disable_adapter()` plus the rubric in context; loss is per-token clipped JSD (beta 0.5). Works under FSDP2.
+- Fix: `apply_chat_template(tokenize=True)` returns non-int ids on transformers 5.8.0; tokenize in two steps (`tokenize=False` then `tokenizer(text)`).
+- RGSD requires `trainer.remove_microbatch_padding=false` so the response-token logits align (a worker assert enforces it).
+
+Core additions: `rgsd/` (judge, dataset, prompts), `skyrl-gym/skyrl_gym/envs/rubric/` (env), and the RGSD JSD branch in `skyrl/backends/skyrl_train/workers/worker.py`.
+
+---
+
 <div align="center">
 
 # SkyRL: A Modular Full-stack RL Library for LLMs
