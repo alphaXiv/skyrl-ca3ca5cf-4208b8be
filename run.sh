@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# RGSD repro (2606.12507) — GRPO ARM (paper's judge-based comparison method).
-# Single-turn rubric env on Qwen-2.5-3B: model emits one response, reward = rubric
-# satisfaction scored by gpt-4o-mini (OpenRouter). GRPO group-normalizes over G=8.
-# Gate: eval/all/avg_score (mean rubric-sat) rises above the step-0 / baseline anchor
-# (~0.236), no collapse. This is the GRPO side of the GRPO-vs-RGSD comparison.
+# RGSD repro (2606.12507) — RGSD ARM, IN-TRAINER (faithful, inside SkyRL).
+# Same SkyRL machinery / env / data / eval as the GRPO arm; ONLY the policy update
+# differs: per-token clipped JSD(beta=0.5) distilling a rubric-conditioned teacher
+# (base weights via peft disable_adapter) into the prompt-only student. Verifier-free:
+# no judge calls in training. Direct A/B vs the GRPO arm (both log eval/all/avg_score
+# to the same wandb project rgsd-skyrl).
 set -euxo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
 
 MODEL="Qwen/Qwen2.5-3B-Instruct"
-RUN_NAME="grpo-qwen2.5-3b-rubric-med"
+RUN_NAME="rgsd-intrainer-qwen2.5-3b-rubric-med"
 NUM_GPUS=$(nvidia-smi -L | wc -l)
 export PYTHONPATH="$ROOT:${PYTHONPATH:-}"
 export RGSD_JUDGE_MODEL="openai/gpt-4o-mini"
 export RGSD_JUDGE_CACHE="$ROOT/judge_cache.jsonl"
 export RGSD_JUDGE_USAGE_OUT="$ROOT/judge_usage.json"
-export RGSD_JUDGE_MAX_USD="10.0"   # training judge cap (won't be hit at this scale)
+export RGSD_JUDGE_MAX_USD="5.0"   # EVAL-only judge bill (training is verifier-free)
 
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   echo "FATAL: OPENROUTER_API_KEY not set in the run environment." >&2
@@ -33,11 +34,11 @@ uv pip install --python .venv/bin/python -q openai datasets pandas pyarrow
 .venv/bin/ray stop 2>/dev/null || true
 .venv/bin/ray start --head --num-gpus="$NUM_GPUS"
 
-# ---------- dataset (deterministic; gitignored) ----------
+# ---------- dataset (identical to GRPO arm; deterministic) ----------
 .venv/bin/python rgsd/build_dataset.py --out data --domain Medical \
   --n-train 512 --n-val 300 --eval-md data_EVAL.md
 
-# ---------- GRPO training ----------
+# ---------- RGSD in-trainer training ----------
 set +e
 .venv/bin/python -m skyrl.train.entrypoints.main_base \
   data.train_data="['$ROOT/data/train.parquet']" \
@@ -45,10 +46,15 @@ set +e
   trainer.algorithm.advantage_estimator="grpo" \
   trainer.algorithm.policy_loss_type="regular" \
   trainer.algorithm.use_kl_loss=false \
+  trainer.algorithm.use_kl_in_reward=false \
+  trainer.algorithm.use_rgsd_loss=true \
+  trainer.algorithm.rgsd_beta=0.5 \
+  trainer.algorithm.rgsd_jsd_clip=0.0 \
+  trainer.remove_microbatch_padding=false \
   trainer.policy.model.path="$MODEL" \
   trainer.policy.model.lora.rank=32 \
   trainer.policy.model.lora.alpha=64 \
-  trainer.policy.optimizer_config.lr=1.0e-5 \
+  trainer.policy.optimizer_config.lr=1.0e-4 \
   trainer.policy.optimizer_config.max_grad_norm=0.5 \
   trainer.policy.optimizer_config.num_warmup_steps=2 \
   trainer.placement.colocate_all=true \
@@ -76,7 +82,7 @@ set +e
   generator.batched=false \
   generator.use_conversation_multi_turn=true \
   generator.step_wise_trajectories=true \
-  generator.n_samples_per_prompt=8 \
+  generator.n_samples_per_prompt=1 \
   generator.max_turns=1 \
   generator.sampling_params.temperature=1.0 \
   generator.sampling_params.top_p=1.0 \
@@ -104,31 +110,27 @@ set -e
 
 # ---------- EVAL.md ----------
 {
-  echo "# GRPO arm — $RUN_NAME (exit $TRAIN_EXIT)"
+  echo "# RGSD in-trainer arm — $RUN_NAME (exit $TRAIN_EXIT)"
   echo
-  echo "Baseline (no-train) reference: base rubric-sat 0.2355, base+rubric 0.8236."
+  echo "Faithful in-SkyRL RGSD (verifier-free). Compare to GRPO arm (peak 0.285) and base (0.236)."
   echo
   echo "## eval/all/avg_score (mean rubric-sat) over training"
   echo '```'
   grep -oE "'eval/all/avg_score': [0-9.]+" train.log | tail -10 || echo "none"
   echo '```'
-  echo "## eval/env/rubric_sat + resp_chars"
+  echo "## RGSD JSD loss (train)"
   echo '```'
-  grep -oE "'eval/env/(rubric_sat|resp_chars)': [0-9.]+" train.log | tail -10 || echo "none"
+  grep -oE "rgsd_jsd['\"]?: ?[0-9.]+|final_loss['\"]?: ?[0-9.]+" train.log | tail -10 || echo "none"
   echo '```'
-  echo "## train reward"
-  echo '```'
-  grep -oE "avg_raw_reward[^,]*" train.log | tail -8 || true
-  echo '```'
-  echo "## Judge cost (OpenRouter, main process)"
+  echo "## Judge cost (eval only; OpenRouter)"
   echo '```'
   cat judge_usage.json 2>/dev/null || echo "no usage file"
   echo '```'
   echo "## NaN check"
-  if grep -qE "(loss|reward|grad_norm)[^a-zA-Z]*(nan|inf)" train.log; then
+  if grep -qE "(loss|jsd|grad_norm)[^a-zA-Z]*(nan|inf)" train.log; then
     echo "WARNING: possible nan/inf"
   else
-    echo "no nan/inf in loss/reward/grad_norm"
+    echo "no nan/inf in loss/jsd/grad_norm"
   fi
 } > EVAL.md
 
